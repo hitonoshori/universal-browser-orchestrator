@@ -1,48 +1,66 @@
 document.getElementById('sendBtn').addEventListener('click', async () => {
-    try {
-        // 1. Берем все открытые вкладки (не только активную!)
-        let tabs = await chrome.tabs.query({});
-        let userPrompt = document.getElementById('prompt').value;
+    // 1. Получаем ВООБЩЕ ВСЕ вкладки
+    let tabs = await chrome.tabs.query({});
+    let userPrompt = document.getElementById('prompt').value;
 
-        tabs.forEach(tab => {
-            // 2. Проверяем, подходит ли вкладка под наши ИИ
-            const isGemini = tab.url.includes("gemini.google.com");
-            const isGroq = tab.url.includes("grok.com");
+    console.log("Всего вкладок найдено:", tabs.length);
 
-            if (isGemini || isGroq) {
-                chrome.scripting.executeScript({
-                    target: { tabId: tab.id },
-                    func: (text, siteType) => {
-                        // Внутренняя логика выбора селектора
-                        let field;
-                        let btn;
+    tabs.forEach(tab => {
+        // Безопасная проверка: если у вкладки нет URL, просто идем к следующей
+        if (!tab || !tab.url) {
+            return;
+        }
 
-                        if (siteType === 'gemini') {
-                            field = document.querySelector('[aria-label="Введите запрос для Gemini"]');
-                            btn = document.querySelector('button[aria-label="Отправить сообщение"]');
-                        } else if (siteType === 'groq') {
-                            field = document.querySelector('.ProseMirror');
-                            // У Грока кнопка отправки часто без лейбла, 
-                            // попробуем найти её по типу или соседству (обычно это последний button в блоке)
-                            btn = document.querySelector('button[type="submit"]') || document.querySelector('.ProseMirror').closest('div').parentElement.querySelector('button');
-                        }
+        const isGemini = tab.url.includes("gemini.google.com");
+        const isGroq = tab.url.includes("grok.com");
 
-                        if (field) {
-                            field.focus();
-                            // Для ProseMirror/Tiptap лучше работает innerText или замена параграфа
-                            field.innerText = text;
-                            field.dispatchEvent(new Event('input', { bubbles: true }));
+        // ... остальной код
 
-                            setTimeout(() => {
-                                if (btn) btn.click();
-                            }, 500);
-                        }
-                    },
-                    args: [userPrompt, isGemini ? 'gemini' : 'groq']
-                });
-            }
-        });
-    } catch (error) {
-        console.error("Ошибка оркестрации:", error);
-    }
+        if (isGemini || isGroq) {
+            console.log("Найдена целевая вкладка:", tab.url);
+
+            chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                func: (text, type) => {
+                    // Эта часть выполняется ВНУТРИ страницы сайта
+                    let field;
+                    let btn;
+
+                    if (type === 'gemini') {
+                        field = document.querySelector('[aria-label="Введите запрос для Gemini"]');
+                        btn = document.querySelector('button[aria-label="Отправить сообщение"]');
+                    } else if (type === 'groq') {
+                        field = document.querySelector('.ProseMirror');
+                        // Ищем кнопку по самому надежному атрибуту, который ты нашел
+                        btn = document.querySelector('[data-testid="chat-submit"]');
+                    }
+
+                    if (field) {
+                        field.focus();
+
+                        // Имитируем ввод текста
+                        document.execCommand('insertText', false, text);
+                        field.dispatchEvent(new Event('input', { bubbles: true }));
+
+                        setTimeout(() => {
+                            if (btn) {
+                                // Маленький хак: если кнопка заблокирована (серая), делаем её активной
+                                if (btn.hasAttribute('disabled')) {
+                                    btn.removeAttribute('disabled');
+                                }
+                                btn.click();
+                                console.log("Грок: Ракета улетела!");
+                            } else {
+                                // Если кнопка не нашлась, пробуем нажать Enter как план Б
+                                field.dispatchEvent(new KeyboardEvent('keydown', {
+                                    key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true
+                                }));
+                            }
+                        }, 700);
+                    }
+                },
+                args: [userPrompt, isGemini ? 'gemini' : 'groq']
+            });
+        }
+    });
 });
