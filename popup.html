@@ -9,7 +9,19 @@
     <h3>UBO Alpha</h3>
     <textarea id="prompt" rows="4" style="width: 100%;" placeholder="Введите промпт..."></textarea>
     <button id="sendBtn" style="width: 100%; margin-top: 10px;">Запустить в Gemini</button>
+    <div class="results-container">
+        <div id="gemini-block">
+            <h3>Gemini:</h3>
+            <div id="gemini-result" class="answer-box">Ожидание запроса...</div>
+        </div>
 
+        <hr> <!-- Разделительная линия -->
+
+        <div id="groq-block">
+            <h3>Groq:</h3>
+            <div id="groq-result" class="answer-box">Ожидание запроса...</div>
+        </div>
+    </div>
     <script src="popup.js"></script>
 </body>
 

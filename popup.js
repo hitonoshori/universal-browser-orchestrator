@@ -1,61 +1,63 @@
 document.getElementById('sendBtn').addEventListener('click', async () => {
-    // 1. Получаем ВООБЩЕ ВСЕ вкладки
     let tabs = await chrome.tabs.query({});
     let userPrompt = document.getElementById('prompt').value;
 
-    console.log("Всего вкладок найдено:", tabs.length);
-
     tabs.forEach(tab => {
-        // Безопасная проверка: если у вкладки нет URL, просто идем к следующей
-        if (!tab || !tab.url) {
-            return;
-        }
+        if (!tab || !tab.url) return;
 
         const isGemini = tab.url.includes("gemini.google.com");
         const isGroq = tab.url.includes("grok.com");
 
-        // ... остальной код
-
         if (isGemini || isGroq) {
-            console.log("Найдена целевая вкладка:", tab.url);
-
             chrome.scripting.executeScript({
                 target: { tabId: tab.id },
                 func: (text, type) => {
-                    // Эта часть выполняется ВНУТРИ страницы сайта
                     let field;
                     let btn;
+                    let selector = type === 'gemini' ? '.markdown-main-panel' : '.message-row';
+
+                    // 1. Считаем сообщения ДО отправки нового вопроса
+                    const initialCount = document.querySelectorAll(selector).length;
 
                     if (type === 'gemini') {
-                        field = document.querySelector('[aria-label="Введите запрос для Gemini"]');
+                        field = document.querySelector('[aria-label="Введите запрос для Gemini"]') || document.querySelector('div[contenteditable="true"]');
                         btn = document.querySelector('button[aria-label="Отправить сообщение"]');
                     } else if (type === 'groq') {
                         field = document.querySelector('.ProseMirror');
-                        // Ищем кнопку по самому надежному атрибуту, который ты нашел
                         btn = document.querySelector('[data-testid="chat-submit"]');
                     }
 
                     if (field) {
                         field.focus();
-
-                        // Имитируем ввод текста
                         document.execCommand('insertText', false, text);
                         field.dispatchEvent(new Event('input', { bubbles: true }));
 
                         setTimeout(() => {
                             if (btn) {
-                                // Маленький хак: если кнопка заблокирована (серая), делаем её активной
-                                if (btn.hasAttribute('disabled')) {
-                                    btn.removeAttribute('disabled');
-                                }
+                                if (btn.hasAttribute('disabled')) btn.removeAttribute('disabled');
                                 btn.click();
-                                console.log("Грок: Ракета улетела!");
                             } else {
-                                // Если кнопка не нашлась, пробуем нажать Enter как план Б
-                                field.dispatchEvent(new KeyboardEvent('keydown', {
-                                    key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true
-                                }));
+                                field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
                             }
+
+                            // 2. Слежка за новым ответом
+                            let checkInterval = setInterval(() => {
+                                let all = document.querySelectorAll(selector);
+
+                                // Берем именно ТО сообщение, которое появилось после нашего initialCount
+                                let lastOne = all[initialCount];
+
+                                if (lastOne && lastOne.getAttribute('aria-busy') === "false") {
+                                    clearInterval(checkInterval);
+
+                                    chrome.runtime.sendMessage({
+                                        action: "ANSWER_RECEIVED",
+                                        provider: type,
+                                        text: lastOne.innerText
+                                    });
+                                }
+                            }, 1000);
+
                         }, 700);
                     }
                 },
@@ -63,4 +65,17 @@ document.getElementById('sendBtn').addEventListener('click', async () => {
             });
         }
     });
+});
+
+// "Ухо" расширения — остается в самом низу файла
+chrome.runtime.onMessage.addListener((message) => {
+    if (message.action === "ANSWER_RECEIVED") {
+        let blockId = message.provider + "-result";
+        let targetBlock = document.getElementById(blockId);
+
+        if (targetBlock) {
+            targetBlock.innerText = message.text;
+            targetBlock.style.color = "black";
+        }
+    }
 });
